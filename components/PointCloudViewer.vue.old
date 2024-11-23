@@ -1,0 +1,348 @@
+<template>
+    <div class="pointcloud-viewer">
+      <div ref="threeContainer" class="three-container"></div>
+      <div v-if="error" class="error-message">
+        {{ error }}
+      </div>
+      <div v-if="loading" class="loading-message">
+        Loading point cloud data...
+      </div>
+    </div>
+  </template>
+  
+  <script>
+  import { ref, onMounted, nextTick, onUnmounted } from 'vue';
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+  import * as hdf5 from 'jsfive';
+  
+  export default {
+    setup() {
+      const threeContainer = ref(null);
+      const error = ref(null);
+      const loading = ref(false);
+      
+      // Three.js variables
+      let scene, camera, renderer, controls;
+      let frames = [];
+      let currentFrameIndex = 0;
+      let animationId;
+      let isActive = true;
+  
+      // File configuration
+      const h5FileUrl = '/out13-v5.h5';
+      
+      // Hardcoded property names and data types
+      const property_names = ['x', 'y', 'z', 'red', 'green', 'blue'];
+      const property_dtypes = ['<f4', '<f4', '<f4', '|u1', '|u1', '|u1'];
+      
+      const initThree = () => {
+        try {
+          const container = threeContainer.value;
+          if (!container) {
+            throw new Error('Container element not found');
+          }
+  
+          const width = container.clientWidth;
+          const height = container.clientHeight;
+  
+          // Initialize scene
+          scene = new THREE.Scene();
+          scene.background = new THREE.Color(0x000000);
+  
+          // Initialize camera
+          camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+          camera.position.z = 5;
+  
+          // Initialize renderer
+          renderer = new THREE.WebGLRenderer({ antialias: true });
+          renderer.setSize(width, height);
+          renderer.setPixelRatio(window.devicePixelRatio);
+          container.appendChild(renderer.domElement);
+  
+          // Initialize controls
+          controls = new OrbitControls(camera, renderer.domElement);
+          controls.enableDamping = true;
+          controls.dampingFactor = 0.05;
+          controls.update();
+  
+        } catch (err) {
+          console.error('Error initializing Three.js:', err);
+          error.value = 'Failed to initialize 3D viewer';
+        }
+      };
+  
+      const processH5File = async (arrayBuffer) => {
+        try {
+          // Initialize jsfive
+          const hdf5File = await new hdf5.File(arrayBuffer, "out13-v4.h5");
+  
+          // Access the root group
+          const rootGroup = hdf5File;
+          
+          // Validate file structure
+          const frames_group = hdf5File.get("frames");
+          
+          if (!frames_group) {
+            throw new Error("Missing 'frames' group in file");
+          }
+          
+          const frames_group_content = frames_group;          
+          // Get frame names
+          const frame_names = frames_group_content.keys;
+          
+          // Initialize Three.js after we confirm we have valid data
+          await nextTick();
+          initThree();
+
+          // Clear existing frames
+          frames.forEach(pointCloud => {
+            if (pointCloud.geometry) pointCloud.geometry.dispose();
+            if (pointCloud.material) pointCloud.material.dispose();
+          });
+          frames = [];
+          currentFrameIndex = 0;
+  
+          // Process each frame
+          for (const frame_name of frame_names) {
+            const frame_dataset = frames_group_content.get(frame_name);
+            console.log(frame_dataset);
+            const data = frame_dataset.value;
+            
+  
+            if (!Array.isArray(data) || !data.length) {
+              console.warn(`Skipping invalid frame: ${frame_name}`);
+              continue;
+            }
+  
+            // data may be a typed array; convert it to a 2D array
+            const num_points = data.length / property_names.length;
+            const num_properties = property_names.length;
+  
+            // Create properties object
+            const properties = {};
+            for (let i = 0; i < property_names.length; i++) {
+              properties[property_names[i]] = new Array(num_points);
+            }
+  
+            for (let i = 0; i < num_points; i++) {
+              for (let j = 0; j < num_properties; j++) {
+                properties[property_names[j]][i] = data[i * num_properties + j];
+              }
+            }
+  
+            // Create geometry
+            const geometry = new THREE.BufferGeometry();
+  
+            // Set positions
+            const positions = new Float32Array(num_points * 3);
+            const x = properties['x'];
+            const y = properties['y'];
+            const z = properties['z'];
+  
+            for (let i = 0; i < num_points; i++) {
+              positions[i * 3] = x[i];
+              positions[i * 3 + 1] = y[i];
+              positions[i * 3 + 2] = z[i];
+            }
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  
+            // Handle colors if present
+            const hasRGB = property_names.includes('red') && 
+                          property_names.includes('green') && 
+                          property_names.includes('blue');
+  
+            let material;
+            if (hasRGB) {
+              const colors = new Uint8Array(num_points * 3);
+              const red = properties['red'];
+              const green = properties['green'];
+              const blue = properties['blue'];
+              
+              for (let i = 0; i < num_points; i++) {
+                colors[i * 3] = red[i];
+                colors[i * 3 + 1] = green[i];
+                colors[i * 3 + 2] = blue[i];
+              }
+              
+              geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3, true));
+              material = new THREE.PointsMaterial({ 
+                vertexColors: true, 
+                size: 0.05,
+                sizeAttenuation: true
+              });
+            } else {
+              material = new THREE.PointsMaterial({ 
+                color: 0xffffff, 
+                size: 0.05,
+                sizeAttenuation: true
+              });
+            }
+  
+            const pointCloud = new THREE.Points(geometry, material);
+            frames.push(pointCloud);
+          }
+  
+          if (frames.length > 0) {
+            error.value = null;
+            animate();
+          } else {
+            throw new Error("No valid frames found in file");
+          }
+  
+        } catch (err) {
+          console.error('Error processing HDF5 file:', err);
+          error.value = `Failed to process point cloud data: ${err.message}`;
+        } finally {
+          loading.value = false;
+        }
+      };
+  
+      const fetchAndProcessH5File = async () => {
+        loading.value = true;
+        error.value = null;
+        
+        try {
+          const response = await fetch(h5FileUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch file: ${response.statusText}`);
+          }
+          
+          const arrayBuffer = await response.arrayBuffer();
+          await processH5File(arrayBuffer);
+        } catch (err) {
+          console.error('Error fetching H5 file:', err);
+          error.value = `Failed to load point cloud file: ${err.message}`;
+          loading.value = false;
+        }
+      };
+  
+      const animate = () => {
+        if (!isActive) return;
+  
+        // Remove previous point cloud
+        scene.clear();
+  
+        // Add current frame
+        scene.add(frames[currentFrameIndex]);
+  
+        // Update controls
+        controls.update();
+  
+        // Render
+        renderer.render(scene, camera);
+  
+        // Update frame index
+        currentFrameIndex = (currentFrameIndex + 1) % frames.length;
+  
+        // Schedule next frame
+        setTimeout(() => {
+          if (isActive) {
+            animationId = requestAnimationFrame(animate);
+          }
+        }, 1000);
+      };
+  
+      const onWindowResize = () => {
+        if (!camera || !renderer || !threeContainer.value) return;
+  
+        const width = threeContainer.value.clientWidth;
+        const height = threeContainer.value.clientHeight;
+  
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
+      };
+  
+      // Lifecycle hooks
+      onMounted(async () => {
+        window.addEventListener('resize', onWindowResize);
+        await fetchAndProcessH5File();
+      });
+  
+      onUnmounted(() => {
+        isActive = false;
+  
+        if (animationId) {
+          cancelAnimationFrame(animationId);
+        }
+  
+        // Cleanup Three.js resources
+        frames.forEach(pointCloud => {
+          if (pointCloud.geometry) pointCloud.geometry.dispose();
+          if (pointCloud.material) pointCloud.material.dispose();
+        });
+  
+        if (scene) {
+          scene.traverse(object => {
+            if (object.geometry) object.geometry.dispose();
+            if (object.material) {
+              if (Array.isArray(object.material)) {
+                object.material.forEach(material => material.dispose());
+              } else {
+                object.material.dispose();
+              }
+            }
+          });
+        //   scene.dispose();
+        }
+  
+        if (renderer) {
+          renderer.dispose();
+          renderer.forceContextLoss();
+          renderer.domElement?.remove();
+        }
+  
+        if (controls) {
+          controls.dispose();
+        }
+  
+        window.removeEventListener('resize', onWindowResize);
+      });
+  
+      return {
+        threeContainer,
+        error,
+        loading
+      };
+    }
+  };
+  </script>
+  
+  <style scoped>
+  .pointcloud-viewer {
+    width: 100%;
+    height: 100%;
+    position: relative;
+  }
+  
+  .three-container {
+    width: 100%;
+    height: 600px;
+  }
+  
+  .error-message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(255, 0, 0, 0.8);
+    color: white;
+    padding: 1rem;
+    border-radius: 4px;
+    text-align: center;
+  }
+  
+  .loading-message {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 1rem;
+    border-radius: 4px;
+    text-align: center;
+  }
+  </style>
+  

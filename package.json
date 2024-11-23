@@ -1,0 +1,21 @@
+{
+  "name": "nuxt-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "@petamoriken/float16": "^3.8.7",
+    "h5wasm": "^0.7.8",
+    "jsfive": "^0.3.14",
+    "nuxt": "^3.14.1592",
+    "three": "^0.170.0",
+    "vue": "latest",
+    "vue-router": "latest"
+  }
+}
