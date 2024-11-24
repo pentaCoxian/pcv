@@ -1,6 +1,19 @@
 <template>
   <div class="pointcloud-viewer">
+    <!-- File Selection Dropdown -->
+    <div>
+      <label for="file-select">Select Point Cloud File: </label>
+      <select id="file-select" v-model="selectedFile">
+        <option v-for="file in availableFiles" :key="file" :value="file">
+          {{ file }}
+        </option>
+      </select>
+    </div>
+
+    <!-- Three.js Container -->
     <div ref="threeContainer" class="three-container"></div>
+
+    <!-- Error and Loading Messages -->
     <div v-if="error" class="error-message">
       {{ error }}
     </div>
@@ -11,31 +24,28 @@
 </template>
 
 <script>
-import { ref, onMounted, nextTick, onUnmounted } from 'vue';
+import { ref, onMounted, nextTick, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as hdf5 from 'h5wasm';
 
 export default {
-setup() {
-  const threeContainer = ref(null);
-  const error = ref(null);
-  const loading = ref(false);
-  
-  // Three.js variables
-  let scene, camera, renderer, controls;
-  let frames = [];
-  let currentFrameIndex = 0;
-  let animationId;
-  let isActive = true;
-  let lastFrameTime = 0;
-  const frameDuration = 1000 / 30; // 30fps
- 
-  // File configuration
-  const h5FileUrl = '/out13-v5.h5';
-  
-  // Hardcoded property names and data types
-  const property_names = ['x', 'y', 'z', 'red', 'green', 'blue'];
+  setup() {
+    const threeContainer = ref(null);
+    const error = ref(null);
+    const loading = ref(false);
+    const availableFiles = ref([]);
+    const selectedFile = ref('');
+
+    let scene, camera, renderer, controls;
+    let frames = [];
+    let currentFrameIndex = 0;
+    let animationId;
+    let isActive = true;
+    let lastFrameTime = 0;
+    const frameDuration = 1000 / 30; // 30fps
+
+    const property_names = ['x', 'y', 'z', 'red', 'green', 'blue'];
   const property_dtypes = ['<f4', '<f4', '<f4', '|u1', '|u1', '|u1'];
   
   const initThree = () => {
@@ -103,10 +113,11 @@ setup() {
         const bNum = parseInt(b.match(/\d+/)[0]);
         return aNum - bNum;
       });
+      console.log(frame_names);
 
       // Initialize Three.js after we confirm we have valid data
       await nextTick();
-      initThree();
+      
 
       // Clear existing frames
       frames.forEach(pointCloud => {
@@ -179,8 +190,8 @@ setup() {
           geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3, true));
           material = new THREE.PointsMaterial({ 
             vertexColors: true, 
-            size: 0.1,
-            sizeAttenuation: true
+            size: 5.0,
+            sizeAttenuation: false
           });
         } else {
           material = new THREE.PointsMaterial({ 
@@ -216,24 +227,45 @@ setup() {
     }
   };
 
-  const fetchAndProcessH5File = async () => {
-    loading.value = true;
-    error.value = null;
-    
-    try {
-      const response = await fetch(h5FileUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch file: ${response.statusText}`);
+    const fetchAndProcessH5File = async () => {
+      loading.value = true;
+      error.value = null;
+
+      const h5FileUrl = `/${selectedFile.value}`;
+      try {
+        const response = await fetch(h5FileUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file: ${response.statusText}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+        await processH5File(arrayBuffer);
+      } catch (err) {
+        console.error('Error fetching H5 file:', err);
+        error.value = `Failed to load point cloud file: ${err.message}`;
+        loading.value = false;
       }
-      
-      const arrayBuffer = await response.arrayBuffer();
-      await processH5File(arrayBuffer);
-    } catch (err) {
-      console.error('Error fetching H5 file:', err);
-      error.value = `Failed to load point cloud file: ${err.message}`;
-      loading.value = false;
-    }
-  };
+    };
+
+    // Fetch the list of available files
+    const fetchAvailableFiles = async () => {
+      try {
+        const response = await fetch('/api/files');
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file list: ${response.statusText}`);
+        }
+        const data = await response.json();
+        availableFiles.value = data.files || [];
+        if (availableFiles.value.length > 0) {
+          selectedFile.value = availableFiles.value[0];
+          await fetchAndProcessH5File();
+        } else {
+          error.value = 'No point cloud files available.';
+        }
+      } catch (err) {
+        console.error('Error fetching file list:', err);
+        error.value = `Failed to load file list: ${err.message}`;
+      }
+    };
 
   const animate = (time) => {
     if (!isActive) return;
@@ -278,9 +310,10 @@ setup() {
 
   // Lifecycle hooks
   onMounted(async () => {
-    window.addEventListener('resize', onWindowResize);
-    await fetchAndProcessH5File();
-  });
+      window.addEventListener('resize', onWindowResize);
+      initThree();
+      await fetchAvailableFiles();
+    });
 
   onUnmounted(() => {
     isActive = false;
@@ -321,11 +354,20 @@ setup() {
 
     window.removeEventListener('resize', onWindowResize);
   });
+  
+  watch(selectedFile, (newFile, oldFile) => {
+      if (newFile !== oldFile) {
+        fetchAndProcessH5File();
+      }
+    });
+
 
   return {
     threeContainer,
     error,
-    loading
+    loading,
+    availableFiles,
+    selectedFile
   };
 }
 };

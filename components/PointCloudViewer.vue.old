@@ -51,8 +51,9 @@
           scene.background = new THREE.Color(0x000000);
   
           // Initialize camera
-          camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-          camera.position.z = 5;
+          camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 10000);
+          camera.position.z = 2000;
+          camera.position.y = 1000;
   
           // Initialize renderer
           renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -168,13 +169,13 @@
               geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3, true));
               material = new THREE.PointsMaterial({ 
                 vertexColors: true, 
-                size: 0.05,
-                sizeAttenuation: true
+                size: 1000.0,
+                sizeAttenuation: false
               });
             } else {
               material = new THREE.PointsMaterial({ 
                 color: 0xffffff, 
-                size: 0.05,
+                size: 5,
                 sizeAttenuation: true
               });
             }
