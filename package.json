@@ -11,11 +11,17 @@
   },
   "dependencies": {
     "@petamoriken/float16": "^3.8.7",
+    "@types/three": "^0.170.0",
     "h5wasm": "^0.7.8",
     "jsfive": "^0.3.14",
+    "lz4js": "^0.2.0",
     "nuxt": "^3.14.1592",
+    "pako": "^2.1.0",
     "three": "^0.170.0",
     "vue": "latest",
     "vue-router": "latest"
+  },
+  "devDependencies": {
+    "eslint-plugin-import": "^2.31.0"
   }
 }
